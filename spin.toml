@@ -14,7 +14,11 @@ component = "html-to-md"
 
 [component.html-to-md]
 source = "target/wasm32-wasip2/release/html_2_md.wasm"
-allowed_outbound_hosts = ["https://ai-bot.great-demo.com"]
+allowed_outbound_hosts = [
+    "https://ai-bot.great-demo.com",
+    "https://*.wikipedia.org",
+    "https://*.mozilla.org"
+]
 [component.html-to-md.build]
 command = "cargo build --target wasm32-wasip2 --release"
 watch = ["src/**/*.rs", "Cargo.toml"]
