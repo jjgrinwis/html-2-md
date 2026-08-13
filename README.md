@@ -1,6 +1,6 @@
 # HTML-to-Markdown for AI Bots
 
-A high-performance [Spin](https://spinframework.dev/) WebAssembly HTTP component that converts HTML to Markdown for AI bot consumption. Designed to run on [Akamai Functions](https://www.akamai.com/products/serverless-computing) and integrate seamlessly with Akamai Bot Manager (BVM) to optimize content delivery for AI agents.
+An example of a high-performance [Spin](https://spinframework.dev/) WebAssembly HTTP component that converts HTML to Markdown for AI bot consumption. Designed to run on [Akamai Functions](https://www.akamai.com/products/serverless-computing) and integrate seamlessly with Akamai Bot Manager (BVM) to optimize content delivery for AI agents.
 
 It's an example just to show how you can use Akamai Functions to optimize the content using [html_to_markdown_rs](https://crates.io/crates/html-to-markdown-rs) crate.
 
@@ -99,6 +99,7 @@ The function adds `x-bvm-bypass-key: production-secure-key-change-me` header to 
    - Checks if Akamai Bot Manager detected a specific AI bot
    - Bot ID set via BVM rules in your property configuration
    - Example: `BOT-69105154` could represent GPTBot, ClaudeBot, etc.
+   - You can create your own custom bot list and combine your own bots with known Akamai bots.
 
 2. **Path Match** (`/html`)
    - Only triggers for HTML content paths
