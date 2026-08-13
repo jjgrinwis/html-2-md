@@ -268,6 +268,68 @@ BVM_BYPASS_KEY = "production-secure-key-change-me"
 - Used for loop prevention
 - Change this to a secure, random value in production
 
+### Allowed Outbound Hosts
+
+**IMPORTANT:** You must configure which domains the function can fetch from in `spin.toml`:
+
+```toml
+[component.html-to-md]
+source = "target/wasm32-wasip2/release/html_2_md.wasm"
+allowed_outbound_hosts = ["https://your-domain.com"]
+```
+
+**Security Benefits:**
+
+- ✅ Prevents the function from being used as an open proxy
+- ✅ Blocks SSRF (Server-Side Request Forgery) attacks
+- ✅ Enforced at WebAssembly runtime level by Spin
+- ✅ Defense-in-depth even if CDN configuration is bypassed
+
+**Configuration Options:**
+
+```toml
+# Single domain
+allowed_outbound_hosts = ["https://www.example.com"]
+
+# Multiple domains
+allowed_outbound_hosts = [
+    "https://www.example.com",
+    "https://api.example.com"
+]
+
+# All subdomains
+allowed_outbound_hosts = ["https://*.example.com"]
+
+# Multiple domains with wildcards
+allowed_outbound_hosts = [
+    "https://*.example.com",
+    "https://*.anothersite.com"
+]
+```
+
+**What happens when blocked:**
+
+If the function tries to fetch a URL not in the allowlist:
+
+```bash
+# Request
+curl -H "x-origin-url: $(echo -n 'https://unauthorized.com' | base64)" https://your-function-url/
+
+# Response (502 Bad Gateway)
+{"error":"Failed to fetch: https://unauthorized.com/"}
+
+# Spin logs show
+ERROR spin_runtime_factors: Outbound network destination not allowed: https://unauthorized.com
+```
+
+**Setup Steps:**
+
+1. Identify your domain(s) that need to be fetched
+2. Update `spin.toml` with `allowed_outbound_hosts`
+3. Rebuild: `spin build`
+4. Deploy: `spin aka deploy`
+5. Test with both allowed and blocked URLs to verify
+
 ### Markdown Conversion Options
 
 The function uses these AI-optimized settings (in `src/lib.rs`):
