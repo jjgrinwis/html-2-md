@@ -19,27 +19,7 @@ When Akamai Bot Manager detects an AI bot, this function automatically converts 
 - 🛡️ **HTTPS Only** - Security-first approach, only fetches HTTPS URLs
 
 ## Architecture
-
-```
-                    ┌─────────────────────────────────────────────────────┐
-                    │           Akamai Edge (CDN)                         │
-                    │                                                     │
-                    │  ┌──────────┐         ┌─────────────────────┐     │
-┌──────┐            │  │   BVM    │         │  Cache (bot-123)    │     │      ┌────────┐
-│ User │───────────▶│  │          │         │  5min TTL/Prefresh  │     │─────▶│ Origin │
-└──────┘            │  └──────────┘         └─────────────────────┘     │      │  mTLS  │
-                    │       │                         ▲                  │      │  SS    │
-┌──────┐            │       │                         │                  │      └────────┘
-│  AI  │───────────▶│  bot-123?───Yes──▶┌──────────────────────┐        │          ▲
-└──────┘            │                    │ Akamai Function      │        │          │
-                    │                    │ (Optimize HTML→MD)   │────────┼──────────┘
-                    │                    └──────────────────────┘        │   (callback with
-                    │                             │                      │    bypass header)
-                    └─────────────────────────────┼──────────────────────┘
-                                                  │
-                                           Returns Markdown
-                                           (cached for bots)
-```
+<img width="806" height="380" alt="image" src="https://github.com/user-attachments/assets/5ab7b429-d984-4d3f-8afa-88df57270774" />
 
 ### Request Flow
 
