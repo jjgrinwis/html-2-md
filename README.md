@@ -99,7 +99,7 @@ The function adds `x-bvm-bypass-key: production-secure-key-change-me` header to 
    - Checks if Akamai Bot Manager detected a specific AI bot
    - Bot ID set via BVM rules in your property configuration
    - Example: `BOT-69105154` could represent GPTBot, ClaudeBot, etc.
-   - You can create your own custom bot list and combine your own bots with known Akamai bots.
+   - You can create your own custom bot list and combine your own bots with known Akamai bots in 1 BOT-xxxx id.
 
 2. **Path Match** (`/html`)
    - Only triggers for HTML content paths
