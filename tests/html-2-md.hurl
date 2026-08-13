@@ -1,6 +1,6 @@
-# Test 1: Valid request with new header
+# Test 1: Valid request with Base64-encoded URL
 GET {{base_url}}/
-x-origin-url: https://www.medemblik.nl
+x-origin-url: aHR0cHM6Ly9haS1ib3QuZ3JlYXQtZGVtby5jb20=
 HTTP 200
 [Asserts]
 header "content-type" contains "text/markdown"
@@ -11,9 +11,9 @@ HTTP 400
 [Asserts]
 jsonpath "$.error" contains "x-origin-url"
 
-# Test 3: Invalid x-origin-url (non-HTTPS)
+# Test 3: Invalid Base64 encoding
 GET {{base_url}}/
-x-origin-url: http://example.com
+x-origin-url: not-valid-base64!!!
 HTTP 400
 [Asserts]
-jsonpath "$.error" contains "https"
+jsonpath "$.error" contains "Base64"
