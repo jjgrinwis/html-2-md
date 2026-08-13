@@ -32,7 +32,6 @@
 use base64::{engine::general_purpose::URL_SAFE, Engine as _};
 use html_to_markdown_rs::{convert, ConversionOptions, HeadingStyle};
 use spin_sdk::http::{send, IntoResponse, Method, Request, Response};
-use std::env;
 use url::Url;
 
 // The #[http_component] macro marks this Wasm module as a Spin HTTP component.
@@ -149,15 +148,6 @@ async fn handle_html_2_md(req: Request) -> anyhow::Result<impl IntoResponse> {
         .filter_map(|(name, value)| value.as_str().map(|v| (name.to_string(), v.to_string())))
         .collect();
 
-    // Read BVM bypass key from environment (fail-secure: warn if missing, don't fail)
-    let bvm_bypass_key = match env::var("BVM_BYPASS_KEY") {
-        Ok(key) if !key.is_empty() => Some(key),
-        _ => {
-            println!("[html-2-md] WARN: BVM_BYPASS_KEY not set - requests may be blocked by BVM");
-            None
-        }
-    };
-
     // `current_url` was initialized earlier from the parsed URL and tracks the URL we're fetching.
     // It changes on each redirect. In Rust vars are immutable by default, so we declared it as
     // `mut` to allow updates inside the loop below.
@@ -169,26 +159,18 @@ async fn handle_html_2_md(req: Request) -> anyhow::Result<impl IntoResponse> {
     // variable is assigned whatever value we `break` with.
     let response: Response = loop {
         // Build and send the request for the current URL, forwarding the original
-        // request headers (cookies, auth, etc.) and adding the tracking and BVM bypass headers.
-        let outbound_req = match &bvm_bypass_key {
-            Some(key) => forward_headers
-                .iter()
-                .fold(
-                    Request::builder().method(Method::Get).uri(&current_url),
-                    |builder, (name, value)| builder.header(name, value),
-                )
-                .header("x-aka-function", "html2md/1.0")
-                .header("x-bvm-bypass-key", key)
-                .build(),
-            None => forward_headers
-                .iter()
-                .fold(
-                    Request::builder().method(Method::Get).uri(&current_url),
-                    |builder, (name, value)| builder.header(name, value),
-                )
-                .header("x-aka-function", "html2md/1.0")
-                .build(),
-        };
+        // request headers (cookies, auth, etc.) and adding the x-aka-function header.
+        // The x-aka-function header identifies requests from this function and is used
+        // by the CDN to prevent routing loops (CDN checks for this header and bypasses
+        // function routing when present).
+        let outbound_req = forward_headers
+            .iter()
+            .fold(
+                Request::builder().method(Method::Get).uri(&current_url),
+                |builder, (name, value)| builder.header(name, value),
+            )
+            .header("x-aka-function", "html2md/1.0")
+            .build();
 
         // `.await` suspends until the response arrives. `send` returns a Result,
         // so we match on Ok (got a response) or Err (network failure).

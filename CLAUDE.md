@@ -27,19 +27,17 @@ curl -H "x-origin-url: $BASE64_URL" http://localhost:3000/
 
 ## Outbound request headers
 
-The function adds these headers to outbound requests:
+The function adds this header to outbound requests:
 
-- **`x-aka-function: html2md/1.0`** — Version tracking for observability
-- **`x-bvm-bypass-key: <value>`** — Secure BVM bypass (value from `BVM_BYPASS_KEY` environment variable)
+- **`x-aka-function: html2md/1.0`** — Identifies function-initiated requests and prevents routing loops
 
-## BVM bypass and loop prevention
+## Loop prevention
 
-To prevent infinite loops (CDN → Function → BVM → Function), the function adds a secure bypass header:
+To prevent infinite loops (CDN → Function → BVM → Function), the function adds `x-aka-function: html2md/1.0` to all outbound requests:
 
-- Outbound requests include `x-bvm-bypass-key` header with value from environment variable
-- Akamai delivery configuration checks this header and bypasses BVM when valid
-- Key is configured via Akamai Functions environment variables (not in source code)
-- Additionally, the `x-aka-function: html2md/1.0` header signals function-initiated requests
+- Akamai delivery configuration checks for this header
+- When present, CDN bypasses function routing and fetches from origin directly
+- No environment variables needed — loop prevention is built into the function behavior
 
 ## Security: Outbound host restrictions
 
@@ -106,16 +104,6 @@ spin plugins install aka
 
 Your component will be built and deployed to Akamai Functions. The command will output the public HTTPS URL where it's accessible.
 
-### Deploy with production BVM bypass key
-
-Deploy the function with your production BVM bypass key:
-
-```bash
-# Production deployment - set secure bypass key
-spin aka deploy --no-confirm --variable BVM_BYPASS_KEY="your-secure-production-key"
-```
-
-The local `spin.toml` contains a placeholder value (`local-test-key-placeholder`) for local testing with `spin up`.
 
 ### Calling the deployed function
 
@@ -169,12 +157,11 @@ The request flow is:
 
 1. Read `x-origin-url` header → Base64 URL-decode it
 2. Validate decoded URL is a well-formed HTTPS URL using the `url` crate
-3. Read `BVM_BYPASS_KEY` from environment (warn if missing, but continue)
-4. Fetch the page via `spin_sdk::http::send` — follow redirects (up to 10) with relative URL resolution
-5. Add outbound headers: `x-aka-function: html2md/1.0` and `x-bvm-bypass-key: <value>`
-6. Validate response is HTML (check `content-type` header) and within 10 MiB size limit
-7. Convert HTML → Markdown via `html_to_markdown_rs::convert` with AI-optimized `ConversionOptions`
-8. Return `200 text/markdown` with Markdown body, or JSON error object on failure
+3. Fetch the page via `spin_sdk::http::send` — follow redirects (up to 10) with relative URL resolution
+4. Add outbound header: `x-aka-function: html2md/1.0` (for loop prevention)
+5. Validate response is HTML (check `content-type` header) and within 10 MiB size limit
+6. Convert HTML → Markdown via `html_to_markdown_rs::convert` with AI-optimized `ConversionOptions`
+7. Return `200 text/markdown` with Markdown body, or JSON error object on failure
 
 ## Error responses
 

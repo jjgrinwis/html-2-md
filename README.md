@@ -55,7 +55,7 @@ When Akamai Bot Manager detects an AI bot, this function automatically converts 
 
 ### Loop Prevention
 
-The function adds `x-bvm-bypass-key: production-secure-key-change-me` header to outbound requests. When CDN sees this header, it bypasses the function routing and fetches from origin normally, preventing infinite loops. This is an extra safety measure in case BOT-xxx is still a match.
+The function adds `x-aka-function: html2md/1.0` header to all outbound requests. Your Akamai delivery configuration should check for this header and bypass function routing when present, fetching from origin normally instead. This prevents infinite loops (CDN → Function → BVM → Function).
 
 ## Akamai Delivery Configuration
 
@@ -83,9 +83,9 @@ The function adds `x-bvm-bypass-key: production-secure-key-change-me` header to 
     {
       "name": "requestHeader",
       "options": {
-        "headerName": "x-bvm-bypass-key",
+        "headerName": "x-aka-function",
         "matchOperator": "IS_NOT_ONE_OF",
-        "values": ["production-secure-key-change-me"]
+        "values": ["html2md/1.0"]
       }
     }
   ],
@@ -106,7 +106,7 @@ The function adds `x-bvm-bypass-key: production-secure-key-change-me` header to 
    - Prevents function calls for assets (CSS, JS, images)
    - Customize to match your content paths
 
-3. **No Bypass Key** (`x-bvm-bypass-key != "production-secure-key-change-me"`)
+3. **No Function Header** (`x-aka-function != "html2md/1.0"`)
    - Ensures request is NOT from the function itself
    - Critical for loop prevention
    - Function adds this header when fetching from origin
@@ -252,21 +252,6 @@ https://your-app-uuid.fwf.app
 ```
 
 ## Configuration
-
-### Environment Variables
-
-Set in `spin.toml`:
-
-```toml
-[component.html-to-md.environment]
-BVM_BYPASS_KEY = "production-secure-key-change-me"
-```
-
-**BVM_BYPASS_KEY**: Secure key that CDN checks to bypass function routing
-
-- Must match the value in your Akamai property configuration
-- Used for loop prevention
-- Change this to a secure, random value in production
 
 ### Allowed Outbound Hosts
 
@@ -465,17 +450,14 @@ The function only fetches HTTPS URLs to prevent:
 
 ### Loop Prevention
 
-The `x-bvm-bypass-key` mechanism ensures the function doesn't create infinite routing loops:
+The `x-aka-function` header ensures the function doesn't create infinite routing loops:
 
-1. Function adds `x-bvm-bypass-key: production-secure-key-change-me` to outbound requests
-2. CDN checks this header value
-3. If present and matches → bypass function routing, fetch from origin
+1. Function adds `x-aka-function: html2md/1.0` to all outbound requests
+2. CDN checks for this header in property configuration
+3. If present → bypass function routing, fetch from origin
 4. If not present → normal BVM detection and routing
 
-**Important:** Keep the bypass key secret and synchronized between:
-
-- `spin.toml` environment variable
-- Akamai property configuration criteria
+**Important:** Your Akamai property must check for this header to prevent loops. See the "Akamai Delivery Configuration" section for the criteria setup.
 
 ### Size Limits
 
@@ -519,15 +501,15 @@ Key metrics to track:
 
 **Solution:** Function automatically adds padding - ensure you're using `BASE_64_URL_ENCODE` transform in Akamai config
 
-### Issue: Getting 422 error in loop
+### Issue: Getting infinite redirect loops
 
-**Cause:** BVM bypass key mismatch
+**Cause:** CDN not bypassing function routing for function-initiated requests
 
 **Solution:**
 
-1. Check `spin.toml` has `BVM_BYPASS_KEY = "production-secure-key-change-me"`
-2. Verify Akamai property criteria checks for same value
-3. Check function logs for actual key being sent
+1. Verify Akamai property criteria includes `x-aka-function != "html2md/1.0"` check
+2. Ensure function routing only happens when this header is NOT present
+3. Check function logs to confirm `x-aka-function: html2md/1.0` header is being sent
 
 ### Issue: Function not being called
 

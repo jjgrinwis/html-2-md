@@ -22,5 +22,3 @@ allowed_outbound_hosts = [
 [component.html-to-md.build]
 command = "cargo build --target wasm32-wasip2 --release"
 watch = ["src/**/*.rs", "Cargo.toml"]
-[component.html-to-md.environment]
-BVM_BYPASS_KEY = "production-secure-key-change-me"
