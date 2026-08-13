@@ -1,0 +1,20 @@
+[package]
+name = "html_2_md"
+authors = ["jjgrinwis <john@grinwis.com>"]
+description = "An Akamai function to convert html to markup language for AI bots."
+version = "0.1.0"
+rust-version = "1.78"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow = "1"
+url = "2"
+spin-sdk = "5.2.0"
+html-to-markdown-rs = "3.11"
+urlencoding = "2"
+base64 = "0.22"
+
+[workspace]

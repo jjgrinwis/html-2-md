@@ -1,0 +1,22 @@
+#:schema https://schemas.spinframework.dev/spin/manifest-v2/latest.json
+
+spin_manifest_version = 2
+
+[application]
+name = "html-2-md"
+version = "0.1.0"
+authors = ["jjgrinwis <john@grinwis.com>"]
+description = "An Akamai function to convert html to markup language for AI bots."
+
+[[trigger.http]]
+route = "/..."
+component = "html-to-md"
+
+[component.html-to-md]
+source = "target/wasm32-wasip2/release/html_2_md.wasm"
+allowed_outbound_hosts = ["https://ai-bot.great-demo.com"]
+[component.html-to-md.build]
+command = "cargo build --target wasm32-wasip2 --release"
+watch = ["src/**/*.rs", "Cargo.toml"]
+[component.html-to-md.environment]
+BVM_BYPASS_KEY = "production-secure-key-change-me"
