@@ -60,6 +60,8 @@ The function adds `x-aka-function: html2md/1.0` header to all outbound requests.
 
 ## Akamai Delivery Configuration
 
+Make sure to fill the `PMUSER_BOT` var with the `AK_FIREWALL_TRIGGERED_RULES` that will set the triggered rule-id which is the bot-id.
+
 ### Property Manager Rule
 
 ```json
