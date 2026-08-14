@@ -19,6 +19,7 @@ When Akamai Bot Manager detects an AI bot, this function automatically converts 
 - 🛡️ **HTTPS Only** - Security-first approach, only fetches HTTPS URLs
 
 ## Architecture
+
 <img width="806" height="380" alt="image" src="https://github.com/user-attachments/assets/5ab7b429-d984-4d3f-8afa-88df57270774" />
 
 ### Request Flow
@@ -70,7 +71,7 @@ The function adds `x-aka-function: html2md/1.0` header to all outbound requests.
       "options": {
         "variableName": "PMUSER_BOT",
         "matchOperator": "IS_ONE_OF",
-        "variableValues": ["BOT-69105154"]
+        "variableValues": ["3991026"]
       }
     },
     {
@@ -96,10 +97,11 @@ The function adds `x-aka-function: html2md/1.0` header to all outbound requests.
 **Criteria Breakdown:**
 
 1. **Bot Detection** (`PMUSER_BOT = "BOT-69105154"`)
-   - Checks if Akamai Bot Manager detected a specific AI bot
+   - Checks if Akamai Bot Manager detected a specific bot
    - Bot ID set via BVM rules in your property configuration
-   - Example: `BOT-69105154` could represent GPTBot, ClaudeBot, etc.
+   - Example: 3991026 is a group called AI Search Crawlers
    - You can create your own custom bot list and combine your own bots with known Akamai bots in 1 BOT-xxxx id.
+   - The full list of known Akamai bot detection rule IDs is documented here: [Akamai Bot Detection Rule IDs](https://techdocs.akamai.com/app-api-protector/docs/bot-detn-methods-rule-ids)
 
 2. **Path Match** (`/html`)
    - Only triggers for HTML content paths
