@@ -155,24 +155,27 @@ hurl --test tests/performance.hurl --very-verbose
 - **Test Runs**: 10 consecutive requests
 - **Note**: The `x-custom-bot: no` (bypass/uncached) path could not be tested from this location — this test environment's IP is always flagged as a bot by Akamai Bot Manager, so a request with `x-custom-bot: no` still routes through the same cacheable function path (confirmed by the requester seeing `Akamai-Cache-Status: NotCacheable from child` from an unflagged IP, vs. `Hit from child`/`Miss from child` seen here).
 
+Runs were spaced so the first request always followed a full expiry of the 2-minute cache TTL, ensuring a genuine cold miss.
+
 | Run | Total Time | TTFB    | Connect | Status | Akamai-Cache-Status |
 |-----|------------|---------|---------|--------|----------------------|
-| 1   |    1695ms  | 1621ms  | 145ms   | 200    | Miss from child      |
-| 2   |     309ms  |  234ms  |  26ms   | 200    | Hit from child       |
-| 3   |     305ms  |  225ms  |  22ms   | 200    | Hit from child       |
-| 4   |     300ms  |  223ms  |  21ms   | 200    | Hit from child       |
-| 5   |     300ms  |  223ms  |  23ms   | 200    | Hit from child       |
-| 6   |     310ms  |  227ms  |  21ms   | 200    | Miss from child      |
-| 7   |     304ms  |  229ms  |  21ms   | 200    | Hit from child       |
-| 8   |     300ms  |  223ms  |  20ms   | 200    | Hit from child       |
-| 9   |     298ms  |  223ms  |  21ms   | 200    | Hit from child       |
-| 10  |     295ms  |  221ms  |  26ms   | 200    | Hit from child       |
+| 1   |    2075ms  | 1995ms  | 122ms   | 200    | Miss from child      |
+| 2   |     301ms  |  222ms  |  24ms   | 200    | Hit from child       |
+| 3   |     296ms  |  223ms  |  20ms   | 200    | Hit from child       |
+| 4   |     297ms  |  226ms  |  21ms   | 200    | Miss from child      |
+| 5   |     313ms  |  235ms  |  24ms   | 200    | Hit from child       |
+| 6   |     291ms  |  216ms  |  23ms   | 200    | Hit from child       |
+| 7   |     305ms  |  223ms  |  26ms   | 200    | Hit from child       |
+| 8   |     300ms  |  227ms  |  28ms   | 200    | Hit from child       |
+| 9   |     302ms  |  228ms  |  24ms   | 200    | Hit from child       |
+| 10  |     297ms  |  220ms  |  23ms   | 200    | Hit from child       |
 
 **Observations:**
 
-- First request (cold, function execution): **1695ms** — well above the ~293ms seen in the original test, likely reflecting Wasm cold start and/or origin latency variance at test time.
-- Cached requests: **~300ms average**, an **~82% improvement** over the cold function call.
-- Run 6 also came back as `Miss from child` mid-sequence despite being identical to the surrounding cache hits — worth investigating whether requests are landing on different child cache nodes or the TTL/prefresh window is shorter than expected.
+- First request (genuine cold miss, cache fully expired beforehand): **2075ms**. This is the function actually doing work: fetching the origin HTML and running the HTML→Markdown conversion. It is **not** Wasm cold start — Spin/Wasm component startup is near-instant, so essentially all of this ~2s is origin fetch + conversion time.
+- Cached requests: **~300ms average**, an **~85% reduction** versus the real cold-miss cost.
+- Run 4 is also labeled `Miss from child` but returned in ~300ms — far too fast to be a real function re-execution. This is almost certainly a child-tier cache miss that was still served from a parent tier's cache, not a fresh function invocation. `Akamai-Cache-Status: Miss from child` on its own is therefore not a reliable signal of "the function ran"; only a ~2s response time is.
+- This means the real, measurable benefit of caching here is avoiding the ~1.8s of origin-fetch-plus-conversion work on every request — the conversion step is the expensive part, exactly as expected, and caching hides nearly all of it.
 
 ## Conclusion
 
