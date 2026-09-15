@@ -34,8 +34,9 @@ When Akamai Bot Manager detects an AI bot, this function automatically converts 
 **For AI Bots (First Request):**
 
 1. AI bot requests `/html` from your domain
-2. **BVM Detection** - Akamai Bot Manager identifies bot (sets `PMUSER_BOT = "bot-123"`)
-3. **CDN Routing** - Criteria match (bot detected + path `/html` + no bypass key):
+2. **BVM Detection** (`CLIENT_REQ` stage) - Akamai Bot Manager identifies bot, sets `PMUSER_BOT = "bot-123"`, and forwards it as an `x-detected-bot` request header
+   - `AK_FIREWALL_TRIGGERED_RULES`/`PMUSER_BOT` is only reliably populated on the edge server handling the client request, so it doesn't survive being re-read at a parent/peer/child tier. The header carries the bot ID forward to whichever tier evaluates the routing decision below.
+3. **CDN Routing** - Criteria match (bot detected via `PMUSER_BOT` or `x-detected-bot` + path `/html` + no bypass key):
    - Encode original URL as Base64: `https://your-domain.com/html`
    - Forward to Akamai Function with `x-origin-url` header
 4. **Function Processing**:
@@ -60,22 +61,51 @@ The function adds `x-aka-function: html2md/1.0` header to all outbound requests.
 
 ## Akamai Delivery Configuration
 
-Make sure to fill the `PMUSER_BOT` var with the `AK_FIREWALL_TRIGGERED_RULES` that will set the triggered rule-id which is the bot-id.
+Bot detection and the function trigger are split across two rules. A `Detect Bot` rule runs at the `CLIENT_REQ` stage, sets `PMUSER_BOT` from `AK_FIREWALL_TRIGGERED_RULES`, and forwards it as an `x-detected-bot` request header — this is required because `PMUSER_BOT`/`AK_FIREWALL_TRIGGERED_RULES` is only reliably populated on the edge server that terminates the client request, not at any parent/peer/child tier that later evaluates the routing rule below.
+
+```json
+{
+  "name": "Detect Bot",
+  "behaviors": [
+    { "name": "setVariable", "options": { "variableName": "PMUSER_BOT", "variableValue": "{{builtin.AK_FIREWALL_TRIGGERED_RULES}}" } },
+    { "name": "modifyOutgoingRequestHeader", "options": { "action": "ADD", "customHeaderName": "x-detected-bot", "headerValue": "{{user.PMUSER_BOT}}" } }
+  ],
+  "criteria": [
+    { "name": "requestType", "options": { "matchOperator": "IS", "value": "CLIENT_REQ" } }
+  ]
+}
+```
 
 ### Property Manager Rule
 
 ```json
 {
   "name": "HTML-2-MD for bots",
-  "criteria": [
+  "children": [
     {
-      "name": "matchVariable",
-      "options": {
-        "variableName": "PMUSER_BOT",
-        "matchOperator": "IS_ONE_OF",
-        "variableValues": ["3991026"]
-      }
-    },
+      "name": "Hit on bot-id",
+      "criteria": [
+        {
+          "name": "matchVariable",
+          "options": {
+            "variableName": "PMUSER_BOT",
+            "matchOperator": "IS_ONE_OF",
+            "variableValues": ["3991026"]
+          }
+        },
+        {
+          "name": "requestHeader",
+          "options": {
+            "headerName": "x-detected-bot",
+            "matchOperator": "IS_ONE_OF",
+            "values": ["3991026"]
+          }
+        }
+      ],
+      "criteriaMustSatisfy": "any"
+    }
+  ],
+  "criteria": [
     {
       "name": "path",
       "options": {
@@ -98,8 +128,8 @@ Make sure to fill the `PMUSER_BOT` var with the `AK_FIREWALL_TRIGGERED_RULES` th
 
 **Criteria Breakdown:**
 
-1. **Bot Detection** (`PMUSER_BOT = "BOT-69105154"`)
-   - Checks if Akamai Bot Manager detected a specific bot
+1. **Bot Detection** (`PMUSER_BOT` or `x-detected-bot` = `"BOT-69105154"`)
+   - Checks either the `PMUSER_BOT` variable or the forwarded `x-detected-bot` header (`criteriaMustSatisfy: "any"`) for a specific bot ID — the header check is what makes this reliable across parent/peer/child tiers, since the variable alone is edge-server-local
    - Bot ID set via BVM rules in your property configuration
    - Example: 3991026 is a group called AI Search Crawlers
    - You can create your own custom bot list and combine your own bots with known Akamai bots in 1 BOT-xxxx id.
@@ -521,9 +551,10 @@ Key metrics to track:
 
 **Solution:**
 
-1. Verify `PMUSER_BOT` variable is set by BVM
-2. Check path matches your content paths
-3. Ensure request doesn't already have bypass key header
+1. Verify `PMUSER_BOT` variable is set by BVM at the `CLIENT_REQ` stage
+2. Verify the `Detect Bot` rule is forwarding it as the `x-detected-bot` request header — if your routing rule runs at a parent/peer/child tier, `PMUSER_BOT` alone won't be visible there
+3. Check path matches your content paths
+4. Ensure request doesn't already have bypass key header
 
 ### Issue: Response too large error
 
