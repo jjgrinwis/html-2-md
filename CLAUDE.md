@@ -116,30 +116,42 @@ curl -H "x-origin-url: $BASE64_URL" https://your-akamai-function-url/
 
 ### Akamai CDN Configuration
 
-In your Akamai Property Manager configuration, encode the original request URL using Base64:
+In your Akamai Property Manager configuration, bot detection and the function trigger are split across two rules because `builtin.AK_FIREWALL_TRIGGERED_RULES` is only reliably populated on the edge server that terminates the client request — it does not survive being read again at a parent/peer/child tier. To make the detected bot ID available wherever the caching/forwarding decision is actually evaluated, it's propagated via an explicit request header instead:
 
 ```
-Match: Variable AK_FIREWALL_DETECTED_RULES matches "BOT-*"
+Rule: Detect Bot (criteria: requestType IS CLIENT_REQ)
 Then:
-  - Set Variable PMUSER_ORIGIN_URL_BASE64 = base64_encode(concat("https://", builtin.AK_HOST, builtin.AK_PATH, builtin.AK_QUERY))
-  - Forward to Akamai Function
-  - Modify Outgoing Request Header: 
+  - Set Variable PMUSER_BOT = {{builtin.AK_FIREWALL_TRIGGERED_RULES}}
+  - Modify Outgoing Request Header:
       Action: Add
-      Header Name: x-origin-url
-      Header Value: {{user.PMUSER_ORIGIN_URL_BASE64}}
+      Header Name: x-detected-bot
+      Header Value: {{user.PMUSER_BOT}}
+
+Rule: HTML-2-MD for bots (criteria: path matches "/html" AND header x-aka-function DOES_NOT_EXIST)
+  Child rule matches if EITHER:
+    - Variable PMUSER_BOT IS_ONE_OF [<bot-id-1>, <bot-id-2>]
+    - Header x-detected-bot IS_ONE_OF [<bot-id-1>, <bot-id-2>]
+  Then:
+    - Set Variable PMUSER_ORIGIN_URL = base64_url_encode(concat("https://", builtin.AK_HOST, builtin.AK_URL))
+    - Modify Outgoing Request Header:
+        Action: Add
+        Header Name: x-origin-url
+        Header Value: {{user.PMUSER_ORIGIN_URL}}
+    - Origin: forward to the Akamai Function (e.g. a `<function-id>.fwf.app` hostname)
+    - Caching: MAX_AGE, ttl 2m
 ```
+
+The last part of the "HTML-2-MD for bots" criteria (`x-aka-function DOES_NOT_EXIST`) is important; otherwise, you can get into a loop and will see a 422 error response.
 
 #### About Bot IDs (BOT-*)
 
-The `BOT-*` pattern matches bot detection rules from Akamai Bot Manager (BVM). Each custom bot list you create gets a unique bot ID. Custom bot lists can include:
+The `BOT-*` pattern (e.g. `BOT-12345`) identifies bot detection rules from Akamai Bot Manager (BVM). Each custom bot list you create gets a unique bot ID. Custom bot lists can include:
 
 - **Your own bot definitions** based on request headers, cookies, client-lists, user-agents, etc.
 - **Akamai-defined bots** (pre-classified bots from Akamai's threat intelligence)
 - **Combination of both** — a single custom bot group can mix your custom rules with Akamai's bot categories
 
-For example, `AK_FIREWALL_DETECTED_RULES` might contain values like:
-- `BOT-12345` (your custom bot list combining header-based detection + Akamai's AI crawler category)
-- `BOT-67890` (another custom list for search engine bots)
+Match against a specific list of known bot IDs rather than a `BOT-*` wildcard — the exact IDs for AI bots still need to be confirmed, so the current config lists them explicitly and checks both the `PMUSER_BOT` variable and the `x-detected-bot` header (belt-and-suspenders while the multi-tier propagation is validated).
 
 The function will:
 1. Decode the Base64 URL

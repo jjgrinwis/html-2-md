@@ -148,6 +148,32 @@ hurl --test tests/performance.hurl
 hurl --test tests/performance.hurl --very-verbose
 ```
 
+## Additional Test: x-custom-bot Header (Function Path Only)
+
+- **URL**: https://ai-bot.great-demo.com/html
+- **Header**: `x-custom-bot: yes` (routes through the html-2-md function)
+- **Test Runs**: 10 consecutive requests
+- **Note**: The `x-custom-bot: no` (bypass/uncached) path could not be tested from this location — this test environment's IP is always flagged as a bot by Akamai Bot Manager, so a request with `x-custom-bot: no` still routes through the same cacheable function path (confirmed by the requester seeing `Akamai-Cache-Status: NotCacheable from child` from an unflagged IP, vs. `Hit from child`/`Miss from child` seen here).
+
+| Run | Total Time | TTFB    | Connect | Status | Akamai-Cache-Status |
+|-----|------------|---------|---------|--------|----------------------|
+| 1   |    1695ms  | 1621ms  | 145ms   | 200    | Miss from child      |
+| 2   |     309ms  |  234ms  |  26ms   | 200    | Hit from child       |
+| 3   |     305ms  |  225ms  |  22ms   | 200    | Hit from child       |
+| 4   |     300ms  |  223ms  |  21ms   | 200    | Hit from child       |
+| 5   |     300ms  |  223ms  |  23ms   | 200    | Hit from child       |
+| 6   |     310ms  |  227ms  |  21ms   | 200    | Miss from child      |
+| 7   |     304ms  |  229ms  |  21ms   | 200    | Hit from child       |
+| 8   |     300ms  |  223ms  |  20ms   | 200    | Hit from child       |
+| 9   |     298ms  |  223ms  |  21ms   | 200    | Hit from child       |
+| 10  |     295ms  |  221ms  |  26ms   | 200    | Hit from child       |
+
+**Observations:**
+
+- First request (cold, function execution): **1695ms** — well above the ~293ms seen in the original test, likely reflecting Wasm cold start and/or origin latency variance at test time.
+- Cached requests: **~300ms average**, an **~82% improvement** over the cold function call.
+- Run 6 also came back as `Miss from child` mid-sequence despite being identical to the surrounding cache hits — worth investigating whether requests are landing on different child cache nodes or the TTL/prefresh window is shorter than expected.
+
 ## Conclusion
 
 The Akamai Edge caching provides **~21% performance improvement** over function execution, with cached requests averaging **230ms** vs **293ms** for function execution. Combined with prefresh, this ensures:
