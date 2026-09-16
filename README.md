@@ -34,19 +34,20 @@ When Akamai Bot Manager detects an AI bot, this function automatically converts 
 **For AI Bots (First Request):**
 
 1. AI bot requests `/html` from your domain
-2. **BVM Detection** (`CLIENT_REQ` stage) - Akamai Bot Manager identifies bot, sets `PMUSER_BOT = "bot-123"`, and forwards it as an `x-detected-bot` request header
-   - `AK_FIREWALL_TRIGGERED_RULES`/`PMUSER_BOT` is only reliably populated on the edge server handling the client request, so it doesn't survive being re-read at a parent/peer/child tier. The header carries the bot ID forward to whichever tier evaluates the routing decision below.
-3. **CDN Routing** - Criteria match (bot detected via `PMUSER_BOT` or `x-detected-bot` + path `/html` + no bypass key):
+2. **BVM Detection** (`CLIENT_REQ` stage) - Akamai Bot Manager identifies bot, sets `PMUSER_BOT` from `AK_FIREWALL_TRIGGERED_RULES`, and forwards it as an `x-detected-bot` request header
+   - `AK_FIREWALL_TRIGGERED_RULES` is only reliably populated on the edge server handling the client request, so it isn't set when re-read at a parent/peer/child tier. The header carries the bot ID forward instead.
+3. **Bot ID Propagation** (non-`CLIENT_REQ` stages) - A second rule runs on parent/peer tiers and re-sets `PMUSER_BOT` by extracting it from the incoming `x-detected-bot` request header, since `AK_FIREWALL_TRIGGERED_RULES` isn't available there
+4. **CDN Routing** - Criteria match (`PMUSER_BOT` set + path `/html` + no bypass key):
    - Encode original URL as Base64: `https://your-domain.com/html`
    - Forward to Akamai Function with `x-origin-url` header
-4. **Function Processing**:
+5. **Function Processing**:
    - Decode Base64 URL
    - Add `x-bvm-bypass-key` and `x-aka-function` headers
    - **Callback through CDN** to fetch content (bypasses function routing due to bypass key)
    - CDN forwards to origin using existing security if enabled (mTLS/SiteShield)
    - Convert HTML → Markdown
    - Return optimized content
-5. **Edge Caching** - CDN caches Markdown response (5 min TTL, prefresh at 4 min)
+6. **Edge Caching** - CDN caches Markdown response (5 min TTL, prefresh at 4 min)
 
 **For AI Bots (Subsequent Requests):**
 
@@ -61,17 +62,33 @@ The function adds `x-aka-function: html2md/1.0` header to all outbound requests.
 
 ## Akamai Delivery Configuration
 
-Bot detection and the function trigger are split across two rules. A `Detect Bot` rule runs at the `CLIENT_REQ` stage, sets `PMUSER_BOT` from `AK_FIREWALL_TRIGGERED_RULES`, and forwards it as an `x-detected-bot` request header — this is required because `PMUSER_BOT`/`AK_FIREWALL_TRIGGERED_RULES` is only reliably populated on the edge server that terminates the client request, not at any parent/peer/child tier that later evaluates the routing rule below.
+Bot detection and the function trigger are split across three rules, because `AK_FIREWALL_TRIGGERED_RULES` is only reliably populated on the edge server that terminates the client request (the `CLIENT_REQ` stage) — it isn't set when later read again at a parent/peer/child tier:
+
+1. **`Detect Bot - CLIENT_REQ stage`** - runs at the `CLIENT_REQ` stage, sets `PMUSER_BOT` from `AK_FIREWALL_TRIGGERED_RULES`, and forwards it as an `x-detected-bot` request header (overwriting any existing value, in case a client sent that header itself)
+2. **`Detect Bot - NON CLIENT_REQ stage (parent/peer)`** - runs on every other stage, and re-sets `PMUSER_BOT` by extracting it from the incoming `x-detected-bot` request header instead, since `AK_FIREWALL_TRIGGERED_RULES` isn't available there
+3. **`HTML-2-MD for bots`** - the routing rule, which can now match on `PMUSER_BOT` alone regardless of which tier evaluates it, since the two rules above guarantee it's populated everywhere
 
 ```json
 {
-  "name": "Detect Bot",
+  "name": "Detect Bot - CLIENT_REQ stage",
   "behaviors": [
     { "name": "setVariable", "options": { "variableName": "PMUSER_BOT", "variableValue": "{{builtin.AK_FIREWALL_TRIGGERED_RULES}}" } },
-    { "name": "modifyOutgoingRequestHeader", "options": { "action": "ADD", "customHeaderName": "x-detected-bot", "headerValue": "{{user.PMUSER_BOT}}" } }
+    { "name": "modifyOutgoingRequestHeader", "options": { "action": "MODIFY", "customHeaderName": "x-detected-bot", "newHeaderValue": "{{user.PMUSER_BOT}}", "avoidDuplicateHeaders": true } }
   ],
   "criteria": [
     { "name": "requestType", "options": { "matchOperator": "IS", "value": "CLIENT_REQ" } }
+  ]
+}
+```
+
+```json
+{
+  "name": "Detect Bot - NON CLIENT_REQ stage (parent/peer)",
+  "behaviors": [
+    { "name": "setVariable", "options": { "valueSource": "EXTRACT", "variableName": "PMUSER_BOT", "extractLocation": "CLIENT_REQUEST_HEADER", "headerName": "x-detected-bot" } }
+  ],
+  "criteria": [
+    { "name": "requestType", "options": { "matchOperator": "IS_NOT", "value": "CLIENT_REQ" } }
   ]
 }
 ```
@@ -92,17 +109,9 @@ Bot detection and the function trigger are split across two rules. A `Detect Bot
             "matchOperator": "IS_ONE_OF",
             "variableValues": ["3991026"]
           }
-        },
-        {
-          "name": "requestHeader",
-          "options": {
-            "headerName": "x-detected-bot",
-            "matchOperator": "IS_ONE_OF",
-            "values": ["3991026"]
-          }
         }
       ],
-      "criteriaMustSatisfy": "any"
+      "criteriaMustSatisfy": "all"
     }
   ],
   "criteria": [
@@ -128,8 +137,8 @@ Bot detection and the function trigger are split across two rules. A `Detect Bot
 
 **Criteria Breakdown:**
 
-1. **Bot Detection** (`PMUSER_BOT` or `x-detected-bot` = `"BOT-69105154"`)
-   - Checks either the `PMUSER_BOT` variable or the forwarded `x-detected-bot` header (`criteriaMustSatisfy: "any"`) for a specific bot ID — the header check is what makes this reliable across parent/peer/child tiers, since the variable alone is edge-server-local
+1. **Bot Detection** (`PMUSER_BOT` = `"BOT-69105154"`)
+   - Checks the `PMUSER_BOT` variable for a specific bot ID. This is reliable at every tier because the two `Detect Bot` rules above keep it populated: from `AK_FIREWALL_TRIGGERED_RULES` at `CLIENT_REQ`, and from the forwarded `x-detected-bot` header everywhere else
    - Bot ID set via BVM rules in your property configuration
    - Example: 3991026 is a group called AI Search Crawlers
    - You can create your own custom bot list and combine your own bots with known Akamai bots in 1 BOT-xxxx id.
@@ -551,8 +560,8 @@ Key metrics to track:
 
 **Solution:**
 
-1. Verify `PMUSER_BOT` variable is set by BVM at the `CLIENT_REQ` stage
-2. Verify the `Detect Bot` rule is forwarding it as the `x-detected-bot` request header — if your routing rule runs at a parent/peer/child tier, `PMUSER_BOT` alone won't be visible there
+1. Verify `PMUSER_BOT` variable is set by BVM at the `CLIENT_REQ` stage, and that the `Detect Bot - CLIENT_REQ stage` rule forwards it as the `x-detected-bot` request header
+2. If your routing rule runs at a parent/peer/child tier, verify the `Detect Bot - NON CLIENT_REQ stage (parent/peer)` rule is re-populating `PMUSER_BOT` from the `x-detected-bot` header there — `AK_FIREWALL_TRIGGERED_RULES` isn't available outside `CLIENT_REQ`
 3. Check path matches your content paths
 4. Ensure request doesn't already have bypass key header
 
