@@ -141,7 +141,7 @@ Rule: HTML-2-MD for bots (criteria: path matches "/html" AND header x-aka-functi
     - Caching: MAX_AGE, ttl 2m
 ```
 
-The last part of the "HTML-2-MD for bots" criteria (`x-aka-function DOES_NOT_EXIST`) is important; otherwise, you can get into a loop and will see a 422 error response.
+The last part of the "HTML-2-MD for bots" criteria (`x-aka-function DOES_NOT_EXIST`) is important; otherwise, you can get into a loop and will see a 415 error response (the function ends up fetching its own `text/markdown` output).
 
 #### About Bot IDs (BOT-*)
 
@@ -181,8 +181,9 @@ All error responses return JSON: `{"error": "error message"}`.
 
 | Status | Condition                                                                                                                           |
 | ------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| 400    | Missing or invalid `x-origin-url` header; URL scheme must be HTTPS                                                                  |
-| 422    | Remote returned non-2xx status; non-HTML content-type; response body exceeds 10 MiB; empty response body; or HTML conversion failed |
+| 400    | Missing or invalid `x-origin-url` header; invalid Base64; invalid UTF-8 in decoded URL; URL scheme must be HTTPS                    |
+| 415    | Remote returned a non-HTML content-type (lets the caller forward the request to origin as-is)                                        |
+| 422    | Remote returned non-2xx status; response body exceeds 10 MiB; empty response body; or HTML conversion failed                        |
 | 502    | Network failure fetching URL; too many redirects (max 10); or missing Location header on redirect response                          |
 
 Success: `200 text/markdown; charset=utf-8` with Markdown body

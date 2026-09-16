@@ -12,7 +12,7 @@ When Akamai Bot Manager detects an AI bot, this function automatically converts 
 
 - 🤖 **AI Bot Optimization** - Automatic Markdown conversion when BVM detects AI bots
 - ⚡ **Edge Caching** - Optimized content cached at Akamai edge servers
-- 🔒 **Loop Prevention** - Secure BVM bypass mechanism prevents infinite routing loops
+- 🔒 **Loop Prevention** - `x-aka-function` request header prevents infinite routing loops
 - 📦 **Base64 Encoding** - Safe URL handling through request headers
 - 🧹 **Clean Markdown** - Removes nav, footer, scripts, styles; optimized for AI consumption
 - 🔄 **Redirect Following** - Handles up to 10 redirects with relative URL resolution
@@ -33,20 +33,21 @@ When Akamai Bot Manager detects an AI bot, this function automatically converts 
 
 **For AI Bots (First Request):**
 
-1. AI bot requests a pge, `/html` in this example.
+1. AI bot requests a page, `/html` in this example.
 2. **BVM Detection** (`CLIENT_REQ` stage) - Akamai Bot Manager identifies bot, sets `PMUSER_BOT` from `AK_FIREWALL_TRIGGERED_RULES`, and forwards it as an `x-detected-bot` request header
    - `AK_FIREWALL_TRIGGERED_RULES` is only populated on the edge server handling the client request, so it isn't set when re-read at a parent/peer tier. The header carries the bot ID forward instead.
 3. **Bot ID Propagation** (non-`CLIENT_REQ` stages) - A second rule runs on parent/peer tiers and re-sets `PMUSER_BOT` by extracting it from the incoming `x-detected-bot` request header, since `AK_FIREWALL_TRIGGERED_RULES` isn't available there
-4. **CDN Routing** - Criteria match (`PMUSER_BOT` set + path `/html` + no bypass key):
+4. **CDN Routing** - Criteria match (`PMUSER_BOT` set + path `/html` + no `x-aka-function` header):
    - Encode original URL as Base64: `https://your-domain.com/html`
    - Forward to Akamai Function with `x-origin-url` header
 5. **Function Processing**:
    - Decode Base64 URL
-   - **Callback through CDN** to fetch content (bypasses function routing due to bypass key)
+   - Add the `x-aka-function: html2md/1.0` header
+   - **Callback through CDN** to fetch content (bypasses function routing because of that header)
    - CDN forwards to origin using existing security if enabled (mTLS/SiteShield)
    - Convert HTML → Markdown
    - Return optimized content
-6. **Edge Caching** - CDN caches Markdown response (5 min TTL, prefresh at 4 min)
+6. **Edge Caching** - CDN caches Markdown response (2 min TTL)
 
 **For AI Bots (Subsequent Requests):**
 
@@ -134,7 +135,7 @@ Bot detection and the function trigger are split across three rules, because `AK
           "options": {
             "variableName": "PMUSER_BOT",
             "matchOperator": "IS_ONE_OF",
-            "variableValues": ["3991026"]
+            "variableValues": ["BOT-69730180", "BOT-69105154"]
           }
         }
       ],
@@ -153,8 +154,7 @@ Bot detection and the function trigger are split across three rules, because `AK
       "name": "requestHeader",
       "options": {
         "headerName": "x-aka-function",
-        "matchOperator": "IS_NOT_ONE_OF",
-        "values": ["html2md/1.0"]
+        "matchOperator": "DOES_NOT_EXIST"
       }
     }
   ],
@@ -164,10 +164,9 @@ Bot detection and the function trigger are split across three rules, because `AK
 
 **Criteria Breakdown:**
 
-1. **Bot Detection** (`PMUSER_BOT` = `"BOT-69105154"`)
+1. **Bot Detection** (`PMUSER_BOT` is one of `BOT-69730180`, `BOT-69105154`)
    - Checks the `PMUSER_BOT` variable for a specific bot ID. This is reliable at every tier because the two `Detect Bot` rules above keep it populated: from `AK_FIREWALL_TRIGGERED_RULES` at `CLIENT_REQ`, and from the forwarded `x-detected-bot` header everywhere else
    - Bot ID set via BVM rules in your property configuration
-   - Example: 3991026 is a group called AI Search Crawlers
    - You can create your own custom bot list and combine your own bots with known Akamai bots in 1 BOT-xxxx id.
    - The full list of known Akamai bot detection rule IDs is documented here: [Akamai Bot Detection Rule IDs](https://techdocs.akamai.com/app-api-protector/docs/bot-detn-methods-rule-ids)
 
@@ -176,7 +175,7 @@ Bot detection and the function trigger are split across three rules, because `AK
    - Prevents function calls for assets (CSS, JS, images)
    - Customize to match your content paths
 
-3. **No Function Header** (`x-aka-function != "html2md/1.0"`)
+3. **No Function Header** (`x-aka-function` does not exist)
    - Ensures request is NOT from the function itself
    - Critical for loop prevention
    - Function adds this header when fetching from origin
@@ -261,21 +260,18 @@ Add this behavior to cache the optimized Markdown responses:
   "options": {
     "behavior": "MAX_AGE",
     "mustRevalidate": false,
-    "ttl": "5m",
-    "prefreshable": true,
-    "prefreshWindow": "80%"
+    "ttl": "2m"
   }
 }
 ```
 
 **Caching Details:**
 
-- **TTL**: 5 minutes (adjust based on content freshness needs)
-- **Prefresh**: Enabled at 80% (4 minutes)
-  - Fresh copy fetched in background before TTL expires
-  - Ensures zero cache misses for popular content
+- **TTL**: 2 minutes (adjust based on content freshness needs)
 - **Cache Key**: Includes full URL (from `x-origin-url` header)
 - **Separate Cache**: Bot requests cached separately from regular user requests
+
+Caching matters a lot here: converting a large page is the expensive part of the request. See [PERFORMANCE.md](PERFORMANCE.md) for measured numbers.
 
 ## Build & Run
 
@@ -307,7 +303,7 @@ BASE64_URL=$(echo -n "https://example.com" | base64)
 curl -H "x-origin-url: $BASE64_URL" http://localhost:3000/
 ```
 
-**Note:** For local testing, the `BVM_BYPASS_KEY` is set to `"production-secure-key-change-me"` in `spin.toml`. Change this for production.
+**Note:** Loop prevention needs no configuration — the function always sends `x-aka-function: html2md/1.0` on outbound requests, and your delivery config keys off that header.
 
 ### Deploy to Akamai Functions
 
@@ -438,8 +434,9 @@ Content in clean Markdown format...
 
 **Errors:**
 
-- `400` - Missing/invalid `x-origin-url` header, invalid Base64, non-HTTPS URL
-- `422` - Remote returned non-2xx status, non-HTML content, response too large (>10 MiB), conversion failed
+- `400` - Missing/invalid `x-origin-url` header, invalid Base64, invalid UTF-8, non-HTTPS URL
+- `415` - Remote returned a non-HTML `content-type` (so the caller can forward the request to origin as-is)
+- `422` - Remote returned non-2xx status, response too large (>10 MiB), empty response body, conversion failed
 - `502` - Network failure, too many redirects (>10), missing Location header
 
 All errors return JSON:
@@ -463,7 +460,7 @@ The function logs key events for debugging:
 [html-2-md] 400 invalid URL scheme: http (must be https)
 [html-2-md] 400 invalid URL format: /html | error: RelativeUrlWithoutBase
 [html-2-md] 422 remote error | url: https://example.com | remote status: 404
-[html-2-md] WARN: BVM_BYPASS_KEY not set - requests may be blocked by BVM
+[html-2-md] 415 non-html content-type: application/pdf https://example.com/doc
 ```
 
 View logs:
@@ -549,10 +546,11 @@ The function strips these headers from outbound requests:
 
 ### Optimization
 
-- **Edge Caching**: 5-minute TTL reduces function invocations
-- **Prefresh**: Background refresh ensures cache hits
+- **Edge Caching**: 2-minute TTL reduces function invocations
 - **WebAssembly**: Near-native performance
 - **Minimal Dependencies**: Fast cold starts
+
+Measured results — including the HTML→Markdown size reduction — are in [PERFORMANCE.md](PERFORMANCE.md).
 
 ### Monitoring
 
@@ -577,7 +575,7 @@ Key metrics to track:
 
 **Solution:**
 
-1. Verify Akamai property criteria includes `x-aka-function != "html2md/1.0"` check
+1. Verify Akamai property criteria includes the `x-aka-function` `DOES_NOT_EXIST` check
 2. Ensure function routing only happens when this header is NOT present
 3. Check function logs to confirm `x-aka-function: html2md/1.0` header is being sent
 
@@ -590,7 +588,7 @@ Key metrics to track:
 1. Verify `PMUSER_BOT` variable is set by BVM at the `CLIENT_REQ` stage, and that the `Detect Bot - CLIENT_REQ stage` rule forwards it as the `x-detected-bot` request header
 2. If your routing rule runs at a parent/peer/child tier, verify the `Detect Bot - NON CLIENT_REQ stage (parent/peer)` rule is re-populating `PMUSER_BOT` from the `x-detected-bot` header there — `AK_FIREWALL_TRIGGERED_RULES` isn't available outside `CLIENT_REQ`
 3. Check path matches your content paths
-4. Ensure request doesn't already have bypass key header
+4. Ensure the request doesn't already carry an `x-aka-function` header
 
 ### Issue: Response too large error
 

@@ -14,7 +14,6 @@ anyhow = "1"
 url = "2"
 spin-sdk = "5.2.0"
 html-to-markdown-rs = "3.11"
-urlencoding = "2"
 base64 = "0.22"
 
 [workspace]
