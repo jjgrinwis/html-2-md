@@ -603,7 +603,7 @@ Key metrics to track:
 ## Dependencies
 
 - [spin-sdk](https://crates.io/crates/spin-sdk) v5.2.0 - Spin framework runtime
-- [html-to-markdown-rs](https://crates.io/crates/html-to-markdown-rs) v3.11.0 - HTML to Markdown conversion
+- [html-to-markdown-rs](https://crates.io/crates/html-to-markdown-rs) v3.14 - HTML to Markdown conversion
 - [url](https://crates.io/crates/url) v2 - URL parsing and validation
 - [base64](https://crates.io/crates/base64) v0.22 - Base64 encoding/decoding
 - [anyhow](https://crates.io/crates/anyhow) v1 - Error handling
