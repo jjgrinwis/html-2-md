@@ -277,7 +277,7 @@ Caching matters a lot here: converting a large page is the expensive part of the
 
 ### Prerequisites
 
-- [Rust](https://www.rust-lang.org/tools/install) (1.78+)
+- [Rust](https://www.rust-lang.org/tools/install) (1.78+, **stable** — no nightly toolchain needed, see [Why spin-sdk 5.2.0](#why-spin-sdk-520-and-not-6x7x))
 - [Spin CLI](https://developer.fermyon.com/spin/install)
 - [Akamai Functions Plugin](https://github.com/fermyon/aka-plugin)
 
@@ -607,6 +607,23 @@ Key metrics to track:
 - [url](https://crates.io/crates/url) v2 - URL parsing and validation
 - [base64](https://crates.io/crates/base64) v0.23 - Base64 encoding/decoding
 - [anyhow](https://crates.io/crates/anyhow) v1 - Error handling
+
+### Why spin-sdk 5.2.0 and not 6.x/7.x
+
+This component deliberately stays on `spin-sdk` 5.x, and on **stable Rust** — no nightly toolchain, no unstable flags.
+
+`spin-sdk` 6.0+ is WASIp3-native. Moving to it means:
+
+- Building for `wasm32-wasip3`, which has no prebuilt `std` on stable — it requires a nightly toolchain plus `-Z build-std`
+- A manifest key (`executor = { type = "wasip3-unstable" }`) that isn't part of the published Spin manifest schema
+- Reworking the request handler: `#[http_component]` → `#[http_service]`, and Request/Response become the `http` crate's types (which removes the header helpers this component uses for outbound header filtering)
+- Rewriting body handling, since 6.0+ replaces byte-slice bodies with a streaming `IncomingBody` — the 10 MiB size guard and UTF-8 decode both become incremental reads
+
+The break is at 6.0, not 7.0 — building this component's `src/lib.rs` against 6.0.0 and 7.0.0 produces the same set of compile errors.
+
+On top of that, whether Akamai Functions currently runs a WASIp3-capable Spin runtime is undocumented. Upgrading would mean a nightly toolchain and an unstable manifest flag in exchange for no functional gain, on a platform that may not accept the result. `spin-sdk` 5.2.0 builds on stable for `wasm32-wasip2` and does everything this component needs.
+
+The other dependencies (`html-to-markdown-rs`, `base64`, `url`, `anyhow`) are not affected by this and are kept current.
 
 ## License
 
