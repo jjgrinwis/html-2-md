@@ -3,54 +3,41 @@
 ## Test Configuration
 
 - **URL**: https://ai-bot.great-demo.com/html
+- **Header**: `x-custom-bot: yes` (routes through the html-2-md function path)
 - **Test Runs**: 10 consecutive requests
 - **Test Location**: Netherlands (Amsterdam/Schiphol region)
 - **Akamai Edge**: NL__AMSTERDAM (104.97.14.6)
 
 ## Results Summary
 
+These numbers come from the [Additional Test](#additional-test-x-custom-bot-header-function-path-only) below — the only run where the first request was confirmed as a genuine cold miss (full cache expiry, function actually fetching origin and converting). The page under test is over 2MB, so that first request's ~2s cost is real function work, not noise, and is excluded from the cached average below.
+
 | Metric | Value |
 |--------|-------|
-| **First Request (Function Execution)** | 293ms |
-| **Cached Average (Requests 2-10)** | 230ms |
-| **Overall Average** | 236ms |
-| **Min Response** | 168ms |
-| **Max Response** | 293ms |
-| **Cache Performance Improvement** | ~21% faster |
+| **First Request (Genuine Cold Miss)** | 2075ms |
+| **Cached Average (Requests 2-10)** | 300ms |
+| **Min Response (Cached)** | 291ms |
+| **Max Response (Cached)** | 313ms |
+| **Cache Performance Improvement** | ~85% faster |
 
-## Detailed Test Results
-
-```
-Run | Total Time | TTFB    | Connect | Status | Content
-----|------------|---------|---------|--------|--------
-1   |      293ms |   293ms |    87ms |    200 | <html>...
-2   |      223ms |   223ms |    24ms |    200 | <html>...
-3   |      241ms |   240ms |    25ms |    200 | <html>...
-4   |      229ms |   229ms |    26ms |    200 | <html>...
-5   |      243ms |   229ms |    28ms |    200 | <html>...
-6   |      168ms |   168ms |    25ms |    200 | <html>...
-7   |      232ms |   232ms |    23ms |    200 | <html>...
-8   |      237ms |   237ms |    32ms |    200 | <html>...
-9   |      242ms |   242ms |    32ms |    200 | <html>...
-10  |      256ms |   256ms |    45ms |    200 | <html>...
-```
+See [Additional Test](#additional-test-x-custom-bot-header-function-path-only) for the run-by-run detail.
 
 ## Analysis
 
-### First Request (Cold Start - Function Execution)
-- **Time**: 293ms
+### First Request (Genuine Cold Miss - Function Execution)
+- **Time**: 2075ms
 - **Flow**: CDN → Akamai Function → Function fetches origin → HTML to Markdown conversion → Response
 - **Components**:
-  - Connection establishment: 87ms
+  - Connection establishment: 122ms
   - BVM detection and routing
-  - Function execution (fetch + conversion)
-  - Time to First Byte: 293ms
+  - Function execution (fetch + conversion) — the dominant cost, since the origin page is >2MB
+  - Time to First Byte: 1995ms
 
 ### Cached Requests (Edge Served)
-- **Average Time**: 230ms
+- **Average Time**: 300ms
 - **Flow**: CDN → Cached Markdown Response (edge served)
 - **Components**:
-  - Connection establishment: 24-45ms (avg ~28ms)
+  - Connection establishment: 20-28ms (avg ~24ms)
   - Cache lookup and delivery
   - No function invocation
   - No origin fetch
@@ -58,28 +45,27 @@ Run | Total Time | TTFB    | Connect | Status | Content
 ### Performance Benefits
 
 1. **Cache Hit Rate Impact**:
-   - 21% faster response time for cached content
+   - ~85% faster response time for cached content vs. a genuine cold miss
    - Reduces function invocations by ~90% (only on cache miss/refresh)
    - Lower origin load (fetches happen only on cache miss)
 
 2. **Connection Reuse**:
-   - First request connection: 87ms
-   - Subsequent requests: 23-45ms (avg 28ms)
+   - First request connection: 122ms
+   - Subsequent requests: 20-28ms (avg 24ms)
    - TCP connection overhead amortized over multiple requests
 
 3. **Edge Caching Benefits**:
    - Content served from Netherlands edge location
-   - 5-minute TTL with 80% prefresh (4 minutes)
-   - Prefresh ensures popular content stays fresh without cache misses
+   - 2-minute TTL for the function path (see caching behavior in the delivery config)
    - Separate cache for bot requests vs regular users
 
 ## Function Performance
 
-The Akamai Function performs the following operations in ~293ms (cold start):
+The Akamai Function performs the following operations in ~2075ms on a genuine cold miss (page >2MB):
 
 1. **Decode Base64 URL**: <1ms
-2. **Fetch HTML from origin**: ~100-150ms (includes CDN → Origin round trip)
-3. **HTML to Markdown conversion**: ~50-100ms (depends on HTML size)
+2. **Fetch HTML from origin**: majority of the ~1995ms TTFB (includes CDN → Origin round trip for a >2MB page)
+3. **HTML to Markdown conversion**: remainder of the ~1995ms TTFB (depends on HTML size)
 4. **Response assembly**: <5ms
 
 ### Conversion Efficiency
@@ -94,14 +80,11 @@ The Akamai Function performs the following operations in ~293ms (cold start):
 ```json
 {
   "behavior": "MAX_AGE",
-  "ttl": "5m",
-  "prefreshable": true,
-  "prefreshWindow": "80%"
+  "ttl": "2m"
 }
 ```
 
-- **TTL**: 5 minutes
-- **Prefresh**: Background refresh at 4 minutes
+- **TTL**: 2 minutes
 - **Cache Key**: Full URL (from `x-origin-url` header)
 - **Separate Cache**: Bot requests cached independently from regular users
 
@@ -116,10 +99,9 @@ The Akamai Function performs the following operations in ~293ms (cold start):
 
 ### For Performance
 
-1. **Prefresh is critical**: Ensures zero cache misses for popular content
-2. **Edge location matters**: Response time varies by user location
-3. **Connection reuse**: HTTP/2 benefits increase with multiple requests
-4. **Origin optimization**: Faster origin response = faster function execution
+1. **Edge location matters**: Response time varies by user location
+2. **Connection reuse**: HTTP/2 benefits increase with multiple requests
+3. **Origin optimization**: Faster origin response = faster function execution, especially on cold miss with large (>2MB) pages
 
 ## Testing Methodology
 
@@ -179,11 +161,11 @@ Runs were spaced so the first request always followed a full expiry of the 2-min
 
 ## Conclusion
 
-The Akamai Edge caching provides **~21% performance improvement** over function execution, with cached requests averaging **230ms** vs **293ms** for function execution. Combined with prefresh, this ensures:
+The Akamai Edge caching provides **~85% performance improvement** over a genuine cold miss, with cached requests averaging **300ms** vs **2075ms** for a real function execution against this >2MB page. This ensures:
 
-- Fast response times for AI bots
+- Fast response times for AI bots on cache hits
 - Reduced function invocations and costs
 - Lower origin load
 - Consistent performance for popular content
 
-The function itself performs well, completing HTML fetch + Markdown conversion in under 300ms, making it suitable for real-time AI bot traffic optimization.
+The function itself does real, non-trivial work on a cold miss — fetching and converting a >2MB HTML page in ~2s — which is exactly what caching is designed to hide from repeat requests.
