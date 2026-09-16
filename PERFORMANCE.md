@@ -7,6 +7,8 @@
 - **Test Runs**: 10 consecutive requests
 - **Test Location**: Netherlands (Amsterdam/Schiphol region)
 - **Akamai Edge**: NL__AMSTERDAM (104.97.14.6)
+- **Origin HTML size**: 2,240,745 bytes (~2.14 MiB)
+- **Converted Markdown size**: 647,630 bytes (~632 KiB)
 
 ## Results Summary
 
@@ -74,6 +76,16 @@ The Akamai Function performs the following operations in ~2075ms on a genuine co
 - Skips images (not useful for AI)
 - Generates clean ATX-style headings
 - No line wrapping (preserves structure)
+
+### Payload Size Reduction
+
+| Format | Size (Content-Length) |
+|--------|------------------------|
+| **Original HTML** | 2,240,745 bytes (~2.14 MiB) |
+| **Converted Markdown** | 647,630 bytes (~632 KiB) |
+| **Reduction** | ~71% smaller (~3.5x) |
+
+Less content to transfer means less content for the AI bot to parse, on top of it already being cleaner Markdown instead of raw, boilerplate-laden HTML.
 
 ## Caching Configuration
 
