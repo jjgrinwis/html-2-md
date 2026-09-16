@@ -33,16 +33,15 @@ When Akamai Bot Manager detects an AI bot, this function automatically converts 
 
 **For AI Bots (First Request):**
 
-1. AI bot requests `/html` from your domain
+1. AI bot requests a pge, `/html` in this example.
 2. **BVM Detection** (`CLIENT_REQ` stage) - Akamai Bot Manager identifies bot, sets `PMUSER_BOT` from `AK_FIREWALL_TRIGGERED_RULES`, and forwards it as an `x-detected-bot` request header
-   - `AK_FIREWALL_TRIGGERED_RULES` is only reliably populated on the edge server handling the client request, so it isn't set when re-read at a parent/peer/child tier. The header carries the bot ID forward instead.
+   - `AK_FIREWALL_TRIGGERED_RULES` is only populated on the edge server handling the client request, so it isn't set when re-read at a parent/peer tier. The header carries the bot ID forward instead.
 3. **Bot ID Propagation** (non-`CLIENT_REQ` stages) - A second rule runs on parent/peer tiers and re-sets `PMUSER_BOT` by extracting it from the incoming `x-detected-bot` request header, since `AK_FIREWALL_TRIGGERED_RULES` isn't available there
 4. **CDN Routing** - Criteria match (`PMUSER_BOT` set + path `/html` + no bypass key):
    - Encode original URL as Base64: `https://your-domain.com/html`
    - Forward to Akamai Function with `x-origin-url` header
 5. **Function Processing**:
    - Decode Base64 URL
-   - Add `x-bvm-bypass-key` and `x-aka-function` headers
    - **Callback through CDN** to fetch content (bypasses function routing due to bypass key)
    - CDN forwards to origin using existing security if enabled (mTLS/SiteShield)
    - Convert HTML → Markdown
@@ -72,11 +71,28 @@ Bot detection and the function trigger are split across three rules, because `AK
 {
   "name": "Detect Bot - CLIENT_REQ stage",
   "behaviors": [
-    { "name": "setVariable", "options": { "variableName": "PMUSER_BOT", "variableValue": "{{builtin.AK_FIREWALL_TRIGGERED_RULES}}" } },
-    { "name": "modifyOutgoingRequestHeader", "options": { "action": "MODIFY", "customHeaderName": "x-detected-bot", "newHeaderValue": "{{user.PMUSER_BOT}}", "avoidDuplicateHeaders": true } }
+    {
+      "name": "setVariable",
+      "options": {
+        "variableName": "PMUSER_BOT",
+        "variableValue": "{{builtin.AK_FIREWALL_TRIGGERED_RULES}}"
+      }
+    },
+    {
+      "name": "modifyOutgoingRequestHeader",
+      "options": {
+        "action": "MODIFY",
+        "customHeaderName": "x-detected-bot",
+        "newHeaderValue": "{{user.PMUSER_BOT}}",
+        "avoidDuplicateHeaders": true
+      }
+    }
   ],
   "criteria": [
-    { "name": "requestType", "options": { "matchOperator": "IS", "value": "CLIENT_REQ" } }
+    {
+      "name": "requestType",
+      "options": { "matchOperator": "IS", "value": "CLIENT_REQ" }
+    }
   ]
 }
 ```
@@ -85,10 +101,21 @@ Bot detection and the function trigger are split across three rules, because `AK
 {
   "name": "Detect Bot - NON CLIENT_REQ stage (parent/peer)",
   "behaviors": [
-    { "name": "setVariable", "options": { "valueSource": "EXTRACT", "variableName": "PMUSER_BOT", "extractLocation": "CLIENT_REQUEST_HEADER", "headerName": "x-detected-bot" } }
+    {
+      "name": "setVariable",
+      "options": {
+        "valueSource": "EXTRACT",
+        "variableName": "PMUSER_BOT",
+        "extractLocation": "CLIENT_REQUEST_HEADER",
+        "headerName": "x-detected-bot"
+      }
+    }
   ],
   "criteria": [
-    { "name": "requestType", "options": { "matchOperator": "IS_NOT", "value": "CLIENT_REQ" } }
+    {
+      "name": "requestType",
+      "options": { "matchOperator": "IS_NOT", "value": "CLIENT_REQ" }
+    }
   ]
 }
 ```
