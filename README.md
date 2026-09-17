@@ -16,7 +16,7 @@ When Akamai Bot Manager detects an AI bot, this function automatically converts 
 - 📦 **Base64 Encoding** - Safe URL handling through request headers
 - 🧹 **Clean Markdown** - Removes nav, footer, scripts, styles; optimized for AI consumption
 - 🔄 **Redirect Following** - Handles up to 10 redirects with relative URL resolution
-- 🚰 **Streaming Passthrough** - Non-HTML content (PDFs, images, JSON) relays straight through at any size
+- 🚰 **Streaming Passthrough** - Non-HTML content (PDFs, images, JSON) relays straight through, up to the platform's 10 MB response cap
 - 🛡️ **HTTPS Only** - Security-first approach, only fetches HTTPS URLs
 
 ## Architecture
@@ -571,7 +571,7 @@ The function strips these headers from outbound requests:
 ### Optimization
 
 - **Edge Caching**: 2-minute TTL reduces function invocations
-- **Streaming passthrough**: non-HTML responses relay with flat memory use and no size cap
+- **Streaming passthrough**: non-HTML responses relay with flat memory use and immediate time-to-first-byte (subject to the platform's 10 MB response cap)
 - **WebAssembly**: Near-native performance
 - **Minimal Dependencies**: Fast cold starts
 
