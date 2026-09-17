@@ -61,7 +61,7 @@ const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
 // `resp_out` by value: it can only be used once, and the compiler enforces it.
 async fn respond(resp_out: ResponseOutparam, status: u16, content_type: &str, body: Vec<u8>) {
     let headers = Fields::new();
-    let _ = headers.append(&"content-type".to_string(), &content_type.as_bytes().to_vec());
+    let _ = headers.append("content-type", content_type.as_bytes());
 
     let response = OutgoingResponse::new(headers);
     let _ = response.set_status_code(status);
@@ -79,7 +79,7 @@ async fn respond(resp_out: ResponseOutparam, status: u16, content_type: &str, bo
 fn header_value(response: &IncomingResponse, name: &str) -> Option<String> {
     response
         .headers()
-        .get(&name.to_string())
+        .get(name)
         .into_iter()
         .next()
         .map(|v| String::from_utf8_lossy(&v).into_owned())
@@ -299,7 +299,7 @@ async fn handle_html_2_md(req: Request, resp_out: ResponseOutparam) {
 
         let headers = Fields::new();
         if !content_type.is_empty() {
-            let _ = headers.append(&"content-type".to_string(), &content_type.as_bytes().to_vec());
+            let _ = headers.append("content-type", content_type.as_bytes());
         }
         let outgoing = OutgoingResponse::new(headers);
         let _ = outgoing.set_status_code(status);
