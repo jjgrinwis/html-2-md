@@ -91,6 +91,12 @@ so anything ignoring the stream reset sees an incomplete file that looks fine.
 Observed cutoffs vary run to run (10.07–10.47 MB), so enforcement is at chunk
 granularity, not an exact byte count.
 
+The component can't prevent this — the response is already in flight by the time
+the cap is reached — so it logs once instead. Watch for
+`[html-2-md] ERROR: passthrough exceeded the ... response cap` in the logs: that
+line means a caller got a truncated body, and the fix is to ask Akamai to raise
+the limit.
+
 Separately, `MAX_BODY_SIZE` in `src/lib.rs` caps buffered **HTML** at 10 MiB
 before conversion, because `html-to-markdown-rs` needs the whole document in
 memory. That one returns a real `422`.

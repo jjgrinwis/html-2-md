@@ -325,11 +325,27 @@ async fn handle_html_2_md(req: Request, resp_out: ResponseOutparam) {
         // can be polled, because they may hold references into themselves.
         let mut stream = std::pin::pin!(stream);
         let mut relayed = 0usize;
+        let mut over_cap_logged = false;
 
         loop {
             match stream.try_next().await {
                 Ok(Some(chunk)) => {
                     relayed += chunk.len();
+
+                    // Past the platform cap the runtime will cut the stream off, leaving
+                    // the caller with a truncated body under a 200 status. We can't stop
+                    // that from here — the response is already in flight — so just log it
+                    // once, loudly, so it's visible in the logs rather than silent.
+                    if !over_cap_logged && relayed > MAX_BODY_SIZE {
+                        over_cap_logged = true;
+                        eprintln!(
+                            "[html-2-md] ERROR: passthrough exceeded the {MAX_BODY_SIZE} byte \
+                             Akamai Functions response cap | {current_url} | the runtime will \
+                             truncate this response — ask Akamai to raise the limit if this \
+                             content needs to pass through the function"
+                        );
+                    }
+
                     if let Err(e) = sink.send(chunk).await {
                         // The response is already in flight, so we can't switch to an
                         // error status — all we can do is stop and log it.
