@@ -548,10 +548,11 @@ The `x-aka-function` header ensures the function doesn't create infinite routing
 - Maximum **HTML** size for conversion: 10 MiB, enforced incrementally as the body arrives
 - This limit exists because `html-to-markdown-rs` needs the whole document in memory at once, and prevents memory exhaustion in the WebAssembly runtime
 - Non-HTML content is streamed through rather than buffered, so it costs only one chunk of memory at a time — but it is **not** exempt from the platform limit below
+- If you need more, just ask your Akamai contact person to raise the limit.
 
 **Akamai Functions caps responses at 10 MB**, whether the component buffers or streams. This is a quota and can be raised on request; it is not a hard architectural limit.
 
-Exceeding it fails untidily rather than cleanly: the runtime returns `200` with the correct `content-type`, streams ~10 MiB, then resets the HTTP/2 stream with `INTERNAL_ERROR` (curl exit 92). The body delivered is a valid *truncated prefix*, so a client that ignores the stream reset sees a successful but incomplete file. Observed cutoffs vary between runs (10.07–10.47 MB), so the cap is applied at chunk granularity rather than at an exact byte count.
+Exceeding it fails untidily rather than cleanly: the runtime returns `200` with the correct `content-type`, streams ~10 MiB, then resets the HTTP/2 stream with `INTERNAL_ERROR` (curl exit 92). The body delivered is a valid _truncated prefix_, so a client that ignores the stream reset sees a successful but incomplete file. Observed cutoffs vary between runs (10.07–10.47 MB), so the cap is applied at chunk granularity rather than at an exact byte count.
 
 > **`spin up` does not reproduce this.** Locally the same component relays a 25 MiB PDF byte-identically with curl exit 0. Large passthrough bodies can only be tested against a deployed function — and use `curl -sS` or `--fail`, because plain `-s` silently swallows the mid-stream reset and the truncated file looks like a success.
 
@@ -623,6 +624,7 @@ Key metrics to track:
 - Implement pagination for large pages
 - Use more specific selectors to extract only needed content
 - Consider increasing `MAX_BODY_SIZE` constant (requires Akamai Functions tier check)
+- Ask your favorite Akamai contact person to raise the limits.
 
 ## Dependencies
 
