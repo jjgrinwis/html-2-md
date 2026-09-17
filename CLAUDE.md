@@ -77,6 +77,30 @@ Request timeouts are enforced by the Spin runtime:
 
 Timeouts are applied automatically by the hosting environment, not at the HTTP client level.
 
+## Response size cap (10 MB)
+
+Akamai Functions caps responses at 10 MB. This applies to **both** paths — the
+streaming passthrough is not exempt, because the cap is a platform quota rather
+than a consequence of how the component manages memory. It can be raised on
+request, so treat it as a quota, not an architectural limit.
+
+Going over it does not produce a clean error. The runtime sends `200` with the
+correct `content-type`, streams ~10 MiB, then resets the HTTP/2 stream with
+`INTERNAL_ERROR` (curl exit 92). The caller receives a valid *truncated prefix*,
+so anything ignoring the stream reset sees an incomplete file that looks fine.
+Observed cutoffs vary run to run (10.07–10.47 MB), so enforcement is at chunk
+granularity, not an exact byte count.
+
+Separately, `MAX_BODY_SIZE` in `src/lib.rs` caps buffered **HTML** at 10 MiB
+before conversion, because `html-to-markdown-rs` needs the whole document in
+memory. That one returns a real `422`.
+
+**Testing implication:** `spin up` does not reproduce the platform cap — locally
+a 25 MiB PDF relays byte-identically with curl exit 0. Large passthrough bodies
+must be tested against a deployed function, using `curl -sS` or `--fail`; plain
+`curl -s` swallows the mid-stream reset and the truncated response looks like a
+success.
+
 ## Deploy to Akamai Functions
 
 This component is designed to run on [Akamai Functions](https://www.akamai.com/products/serverless-computing) using the Spin runtime.
@@ -173,7 +197,7 @@ The request flow is:
 2. Validate decoded URL is a well-formed HTTPS URL using the `url` crate
 3. Fetch the page via `spin_sdk::http::send` — follow redirects (up to 10) with relative URL resolution
 4. Add outbound header: `x-aka-function: html2md/1.0` (for loop prevention)
-5. Check `content-type` — if it isn't `text/html`, **stream** the remote response back unchanged (status, content-type, body) and stop here; no size limit applies on this path
+5. Check `content-type` — if it isn't `text/html`, **stream** the remote response back unchanged (status, content-type, body) and stop here. Streaming keeps memory flat but does not bypass the platform's 10 MB response cap (see below)
 6. Otherwise accumulate the body chunk by chunk, rejecting it once it exceeds the 10 MiB conversion limit
 7. Convert HTML → Markdown via `html_to_markdown_rs::convert` with AI-optimized `ConversionOptions`
 8. Return `200 text/markdown` with Markdown body, or JSON error object on failure

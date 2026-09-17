@@ -47,10 +47,20 @@ use url::Url;
 use spin_sdk::http_component;
 
 // Maximum HTML size we'll buffer in memory before converting.
-// This limit exists *only* for the conversion path: html-to-markdown-rs needs the
-// whole document in memory at once, so a huge page could exhaust Wasm memory.
-// Responses we merely relay (see the passthrough path below) are streamed and
-// therefore have no size limit at all — a 500 MB PDF costs us one chunk of memory.
+// This limit exists for the conversion path: html-to-markdown-rs needs the whole
+// document in memory at once, so a huge page could exhaust Wasm memory.
+//
+// Responses we merely relay (see the passthrough path below) are streamed, so they
+// cost us only one chunk of memory at a time — but they are NOT exempt from the
+// size limit. Akamai Functions caps responses at 10 MB regardless of whether the
+// component buffers or streams. Go past it and the runtime sends a 200 with correct
+// headers, streams ~10 MiB, then resets the HTTP/2 stream with INTERNAL_ERROR; the
+// caller is left holding a valid-looking but truncated body. The cap is a quota and
+// can be raised on request, so don't treat it as a hard architectural limit.
+//
+// Note that `spin up` does not reproduce this — locally a 25 MiB PDF relays
+// byte-identically. Large passthrough bodies can only be tested against a deployed
+// function, with `curl -sS` so the mid-stream reset isn't silently swallowed.
 // 10 * 1024 * 1024 = 10,485,760 bytes
 const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
 

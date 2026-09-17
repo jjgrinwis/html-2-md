@@ -437,7 +437,9 @@ Content in clean Markdown format...
 
 If the fetched URL returns anything other than `text/html` — JSON, a PDF, an image, plain text — there is nothing to convert, so the function relays the remote response unchanged: original status code, original `content-type`, original body. No error status, and no failover rules needed in the delivery configuration.
 
-This path is **streamed**: each chunk read from the remote is written straight to the client, so memory use stays flat regardless of file size and the client starts receiving bytes immediately. There is no size limit on relayed content.
+This path is **streamed**: each chunk read from the remote is written straight to the client, so memory use stays flat regardless of file size and the client starts receiving bytes immediately (measured time-to-first-byte is the same for a 27-byte body and a 10 MB one).
+
+Streaming does **not** exempt this path from the platform's 10 MB response cap — see [Size Limits](#size-limits).
 
 ```
 Content-Type: application/json
@@ -544,9 +546,14 @@ The `x-aka-function` header ensures the function doesn't create infinite routing
 ### Size Limits
 
 - Maximum **HTML** size for conversion: 10 MiB, enforced incrementally as the body arrives
-- The limit exists only because `html-to-markdown-rs` needs the whole document in memory at once
-- Non-HTML content is streamed through instead, so it has no size limit
-- Prevents memory exhaustion in the WebAssembly runtime
+- This limit exists because `html-to-markdown-rs` needs the whole document in memory at once, and prevents memory exhaustion in the WebAssembly runtime
+- Non-HTML content is streamed through rather than buffered, so it costs only one chunk of memory at a time — but it is **not** exempt from the platform limit below
+
+**Akamai Functions caps responses at 10 MB**, whether the component buffers or streams. This is a quota and can be raised on request; it is not a hard architectural limit.
+
+Exceeding it fails untidily rather than cleanly: the runtime returns `200` with the correct `content-type`, streams ~10 MiB, then resets the HTTP/2 stream with `INTERNAL_ERROR` (curl exit 92). The body delivered is a valid *truncated prefix*, so a client that ignores the stream reset sees a successful but incomplete file. Observed cutoffs vary between runs (10.07–10.47 MB), so the cap is applied at chunk granularity rather than at an exact byte count.
+
+> **`spin up` does not reproduce this.** Locally the same component relays a 25 MiB PDF byte-identically with curl exit 0. Large passthrough bodies can only be tested against a deployed function — and use `curl -sS` or `--fail`, because plain `-s` silently swallows the mid-stream reset and the truncated file looks like a success.
 
 ### Header Filtering
 
