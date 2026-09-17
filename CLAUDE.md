@@ -169,6 +169,33 @@ Rule: HTML-2-MD for bots (criteria: path matches "/html" AND header x-aka-functi
         Header Value: {{user.PMUSER_ORIGIN_URL}}
     - Origin: forward to the Akamai Function (e.g. a `<function-id>.fwf.app` hostname)
     - Caching: MAX_AGE, ttl 2m
+    - Cache ID Modification: INCLUDE_VARIABLE, variableName PMUSER_ORIGIN_URL
+```
+
+The `cacheId` behavior is **required, not optional**. Forwarding to the function
+rewrites the outgoing request path to `/` and moves the real target URL into the
+`x-origin-url` header, so without it every function-routed request computes the
+same cache key (`.../<function-id>.fwf.app/`) no matter which URL it asked for.
+The first response to populate that entry is then served to every other URL for
+the whole TTL — `?page=2` gets page 1's Markdown, and nothing appears in the logs
+because the function is never invoked for the colliding requests.
+
+Including `PMUSER_ORIGIN_URL` in the cache ID makes the key vary by the actual
+target, since that variable is the same value the function acts on, so the key
+cannot drift from what gets fetched. Verify with
+`Pragma: akamai-x-get-cache-key` — the key should carry a
+`cid=///PMUSER_ORIGIN_URL=<base64>` component that differs per URL, while a
+repeat of the *same* URL still returns a cache hit (if every request is a miss,
+the cache ID is too granular and the function is being bypassed):
+
+```json
+{
+  "name": "cacheId",
+  "options": {
+    "rule": "INCLUDE_VARIABLE",
+    "variableName": "PMUSER_ORIGIN_URL"
+  }
+}
 ```
 
 The last part of the "HTML-2-MD for bots" criteria (`x-aka-function DOES_NOT_EXIST`) is important; otherwise you can get into a loop, where the function ends up fetching its own `text/markdown` output. Note this loop no longer surfaces as an error status: because `text/markdown` isn't HTML, the function relays it back unchanged, so the response still looks correct while silently costing an extra edge round trip per request. Watch for `[html-2-md] passthrough non-html content-type: text/markdown` in the logs — that line means the loop guard isn't working.

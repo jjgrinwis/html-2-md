@@ -251,6 +251,9 @@ Bot detection and the function trigger are split across three rules, because `AK
 - Function uses catch-all route, doesn't need path preservation
 - Original URL passed via `x-origin-url` header instead
 
+> ⚠️ Because this rewrite makes the outgoing path constant, the cache key is
+> constant too unless you fix it explicitly — see [Caching Configuration](#caching-configuration).
+
 ### Caching Configuration
 
 Add this behavior to cache the optimized Markdown responses:
@@ -266,11 +269,51 @@ Add this behavior to cache the optimized Markdown responses:
 }
 ```
 
+And this one, which is **required rather than optional**:
+
+```json
+{
+  "name": "cacheId",
+  "options": {
+    "rule": "INCLUDE_VARIABLE",
+    "variableName": "PMUSER_ORIGIN_URL"
+  }
+}
+```
+
+**Why `cacheId` is required:** the [`rewriteUrl` behavior](#2-functions-origin) sends
+every function-routed request to `/`, and the real target travels in the
+`x-origin-url` header — which is not part of the cache key. Without `cacheId`,
+all function-routed requests collapse onto a single entry
+(`.../<function-id>.fwf.app/`), so the first response to populate it is served to
+every other URL for the full TTL. `?page=2` would return page 1's Markdown, and
+nothing would show up in the logs, because the function is never invoked for the
+colliding requests.
+
+Including `PMUSER_ORIGIN_URL` makes the key vary by actual target. That variable
+is the same value handed to the function, so the key can't drift from what gets
+fetched, and being Base64 it introduces no delimiter characters.
+
 **Caching Details:**
 
 - **TTL**: 2 minutes (adjust based on content freshness needs)
-- **Cache Key**: Includes full URL (from `x-origin-url` header)
+- **Cache Key**: varies by `PMUSER_ORIGIN_URL` (the Base64 target URL), so it reflects the full original URL including query string
 - **Separate Cache**: Bot requests cached separately from regular user requests
+
+**Verifying it:** request with `Pragma: akamai-x-get-cache-key` and check the
+returned `X-Cache-Key`:
+
+```bash
+curl -sI "https://your-domain.com/html?bla=6" \
+  -H "Pragma: akamai-x-get-cache-key, akamai-x-cache-on" | grep -i x-cache
+```
+
+Two things should hold, and both matter:
+
+| Check | Expected | If it fails |
+| --- | --- | --- |
+| `?bla=6` vs `?bla=7` | different `cid=` values, both `TCP_MISS` first time | cache ID missing — URLs are colliding |
+| same URL requested twice | `TCP_MEM_HIT` on the second | cache ID too granular — function is being bypassed on every request |
 
 Caching matters a lot here: converting a large page is the expensive part of the request. See [PERFORMANCE.md](PERFORMANCE.md) for measured numbers.
 
