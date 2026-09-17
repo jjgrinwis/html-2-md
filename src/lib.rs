@@ -336,6 +336,16 @@ async fn handle_html_2_md(req: Request, resp_out: ResponseOutparam) {
                     // the caller with a truncated body under a 200 status. We can't stop
                     // that from here — the response is already in flight — so just log it
                     // once, loudly, so it's visible in the logs rather than silent.
+                    //
+                    // Note this counts bytes as they pass rather than checking the
+                    // remote's content-length up front, and that's deliberate: a chunked
+                    // response declares no length at all, so a pre-flight check would let
+                    // it through unnoticed. Counting also reports what actually crossed
+                    // the wire instead of what the origin claimed. The cost is that we
+                    // only find out mid-stream, which is fine here since the goal is a
+                    // diagnosable log rather than prevention — and prevention was never
+                    // possible for chunked bodies anyway. Don't "optimize" this into a
+                    // content-length check.
                     if !over_cap_logged && relayed > MAX_BODY_SIZE {
                         over_cap_logged = true;
                         eprintln!(
