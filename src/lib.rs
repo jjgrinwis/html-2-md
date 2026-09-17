@@ -348,12 +348,18 @@ async fn handle_html_2_md(req: Request, resp_out: ResponseOutparam) {
                     // content-length check.
                     if !over_cap_logged && relayed > MAX_BODY_SIZE {
                         over_cap_logged = true;
-                        eprintln!(
+                        // Format into a single String and write that, rather than letting
+                        // eprintln! interpolate directly. Rust's stderr is unbuffered, so
+                        // each format fragment becomes its own write — and Akamai's log
+                        // collector turns every write into a separate log record, which
+                        // would scatter this message over six lines and make it ungreppable.
+                        let msg = format!(
                             "[html-2-md] ERROR: passthrough exceeded the {MAX_BODY_SIZE} byte \
                              Akamai Functions response cap | {current_url} | the runtime will \
                              truncate this response — ask Akamai to raise the limit if this \
                              content needs to pass through the function"
                         );
+                        eprintln!("{msg}");
                     }
 
                     if let Err(e) = sink.send(chunk).await {
