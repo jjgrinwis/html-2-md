@@ -141,7 +141,7 @@ Rule: HTML-2-MD for bots (criteria: path matches "/html" AND header x-aka-functi
     - Caching: MAX_AGE, ttl 2m
 ```
 
-The last part of the "HTML-2-MD for bots" criteria (`x-aka-function DOES_NOT_EXIST`) is important; otherwise, you can get into a loop and will see a 415 error response (the function ends up fetching its own `text/markdown` output).
+The last part of the "HTML-2-MD for bots" criteria (`x-aka-function DOES_NOT_EXIST`) is important; otherwise you can get into a loop, where the function ends up fetching its own `text/markdown` output. Note this loop no longer surfaces as an error status: because `text/markdown` isn't HTML, the function relays it back unchanged, so the response still looks correct while silently costing an extra edge round trip per request. Watch for `[html-2-md] passthrough non-html content-type: text/markdown` in the logs — that line means the loop guard isn't working.
 
 #### About Bot IDs (BOT-*)
 
@@ -163,7 +163,9 @@ The function will:
 
 - **`src/lib.rs`** — the entire application. A single async `#[http_component]` handler function.
 - **`spin.toml`** — Spin manifest: declares the HTTP trigger route, points to the compiled `.wasm`, and sets `allowed_outbound_hosts` (must include any hosts the component fetches from).
-- **`Cargo.toml`** — key dependencies: `spin-sdk`, `html-to-markdown-rs`, `url`, `anyhow`.
+- **`Cargo.toml`** — key dependencies: `spin-sdk`, `html-to-markdown-rs`, `url`, `anyhow`, `futures`.
+
+The handler uses Spin's **streaming** (Input/Output Params) form — `async fn handle(req: Request, resp_out: ResponseOutparam)` with no return value — rather than the simpler `-> Result<impl IntoResponse>` form. This is required to relay non-HTML bodies without buffering them. Consequences: every error path calls `error_json(resp_out, ...).await` then `return` instead of returning a `Response`, and `resp_out` may be set exactly once (the compiler enforces this, since it is taken by value).
 
 The request flow is:
 
@@ -171,9 +173,10 @@ The request flow is:
 2. Validate decoded URL is a well-formed HTTPS URL using the `url` crate
 3. Fetch the page via `spin_sdk::http::send` — follow redirects (up to 10) with relative URL resolution
 4. Add outbound header: `x-aka-function: html2md/1.0` (for loop prevention)
-5. Validate response is HTML (check `content-type` header) and within 10 MiB size limit
-6. Convert HTML → Markdown via `html_to_markdown_rs::convert` with AI-optimized `ConversionOptions`
-7. Return `200 text/markdown` with Markdown body, or JSON error object on failure
+5. Check `content-type` — if it isn't `text/html`, **stream** the remote response back unchanged (status, content-type, body) and stop here; no size limit applies on this path
+6. Otherwise accumulate the body chunk by chunk, rejecting it once it exceeds the 10 MiB conversion limit
+7. Convert HTML → Markdown via `html_to_markdown_rs::convert` with AI-optimized `ConversionOptions`
+8. Return `200 text/markdown` with Markdown body, or JSON error object on failure
 
 ## Error responses
 
@@ -182,8 +185,7 @@ All error responses return JSON: `{"error": "error message"}`.
 | Status | Condition                                                                                                                           |
 | ------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | 400    | Missing or invalid `x-origin-url` header; invalid Base64; invalid UTF-8 in decoded URL; URL scheme must be HTTPS                    |
-| 415    | Remote returned a non-HTML content-type (lets the caller forward the request to origin as-is)                                        |
-| 422    | Remote returned non-2xx status; response body exceeds 10 MiB; empty response body; or HTML conversion failed                        |
+| 422    | Remote returned non-2xx status; HTML exceeds the 10 MiB conversion limit; empty response body; or HTML conversion failed             |
 | 502    | Network failure fetching URL; too many redirects (max 10); or missing Location header on redirect response                          |
 
 Success: `200 text/markdown; charset=utf-8` with Markdown body

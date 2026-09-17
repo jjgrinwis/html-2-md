@@ -16,6 +16,7 @@ When Akamai Bot Manager detects an AI bot, this function automatically converts 
 - 📦 **Base64 Encoding** - Safe URL handling through request headers
 - 🧹 **Clean Markdown** - Removes nav, footer, scripts, styles; optimized for AI consumption
 - 🔄 **Redirect Following** - Handles up to 10 redirects with relative URL resolution
+- 🚰 **Streaming Passthrough** - Non-HTML content (PDFs, images, JSON) relays straight through at any size
 - 🛡️ **HTTPS Only** - Security-first approach, only fetches HTTPS URLs
 
 ## Architecture
@@ -432,11 +433,22 @@ Content-Type: text/markdown; charset=utf-8
 Content in clean Markdown format...
 ```
 
+**Non-HTML passthrough:**
+
+If the fetched URL returns anything other than `text/html` — JSON, a PDF, an image, plain text — there is nothing to convert, so the function relays the remote response unchanged: original status code, original `content-type`, original body. No error status, and no failover rules needed in the delivery configuration.
+
+This path is **streamed**: each chunk read from the remote is written straight to the client, so memory use stays flat regardless of file size and the client starts receiving bytes immediately. There is no size limit on relayed content.
+
+```
+Content-Type: application/json
+
+{"message":"hello, world!"}
+```
+
 **Errors:**
 
 - `400` - Missing/invalid `x-origin-url` header, invalid Base64, invalid UTF-8, non-HTTPS URL
-- `415` - Remote returned a non-HTML `content-type` (so the caller can forward the request to origin as-is)
-- `422` - Remote returned non-2xx status, response too large (>10 MiB), empty response body, conversion failed
+- `422` - Remote returned non-2xx status, HTML exceeds the 10 MiB conversion limit, empty response body, conversion failed
 - `502` - Network failure, too many redirects (>10), missing Location header
 
 All errors return JSON:
@@ -460,7 +472,9 @@ The function logs key events for debugging:
 [html-2-md] 400 invalid URL scheme: http (must be https)
 [html-2-md] 400 invalid URL format: /html | error: RelativeUrlWithoutBase
 [html-2-md] 422 remote error | url: https://example.com | remote status: 404
-[html-2-md] 415 non-html content-type: application/pdf https://example.com/doc
+
+# Non-HTML content relayed unchanged (not an error)
+[html-2-md] passthrough non-html content-type: application/pdf | 51234 bytes | https://example.com/doc
 ```
 
 View logs:
@@ -486,7 +500,8 @@ Test cases:
 
 - Valid Base64-encoded URL
 - Missing header (400 error)
-- Non-HTTPS URL (400 error)
+- Invalid Base64 (400 error)
+- Non-HTML content-type relayed unchanged (200 passthrough)
 
 ### Manual Testing
 
@@ -528,9 +543,10 @@ The `x-aka-function` header ensures the function doesn't create infinite routing
 
 ### Size Limits
 
-- Maximum response size: 10 MiB
-- Prevents memory exhaustion in WebAssembly runtime
-- Akamai Functions enforces similar limits
+- Maximum **HTML** size for conversion: 10 MiB, enforced incrementally as the body arrives
+- The limit exists only because `html-to-markdown-rs` needs the whole document in memory at once
+- Non-HTML content is streamed through instead, so it has no size limit
+- Prevents memory exhaustion in the WebAssembly runtime
 
 ### Header Filtering
 
@@ -547,6 +563,7 @@ The function strips these headers from outbound requests:
 ### Optimization
 
 - **Edge Caching**: 2-minute TTL reduces function invocations
+- **Streaming passthrough**: non-HTML responses relay with flat memory use and no size cap
 - **WebAssembly**: Near-native performance
 - **Minimal Dependencies**: Fast cold starts
 
@@ -607,6 +624,7 @@ Key metrics to track:
 - [url](https://crates.io/crates/url) v2 - URL parsing and validation
 - [base64](https://crates.io/crates/base64) v0.23 - Base64 encoding/decoding
 - [anyhow](https://crates.io/crates/anyhow) v1 - Error handling
+- [futures](https://crates.io/crates/futures) v0.3 - Stream/Sink traits for the streaming passthrough path
 
 ### Why spin-sdk 5.2.0 and not 6.x/7.x
 
